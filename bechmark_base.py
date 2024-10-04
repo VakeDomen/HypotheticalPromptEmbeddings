@@ -2,13 +2,13 @@ from ragchecker import RAGResults, RAGChecker
 from ragchecker.metrics import all_metrics
 import asyncio
 from ollama import AsyncClient
+import time
 
-# initialize ragresults from json/dict
+start_time = time.time()
+
 with open("data_to_bm.json") as fp:
     rag_results = RAGResults.from_json(fp.read())
 
-
-# Define the function for invoking your own LLM
 def my_llm_api_func(prompts):
     """
     Get responses from LLM for the input prompts.
@@ -40,10 +40,6 @@ async def generate_all(prompts):
     tasks = [generate(prompt) for prompt in prompts]
     return await asyncio.gather(*tasks)
 
-
-# initialize evaluator with customized API function
-evaluator = RAGChecker(
-)
 # set-up the evaluator
 evaluator = RAGChecker(
     custom_llm_api_func=my_llm_api_func
@@ -52,3 +48,4 @@ evaluator = RAGChecker(
 # evaluate results with selected metrics or certain groups, e.g., retriever_metrics, generator_metrics, all_metrics
 evaluator.evaluate(rag_results, all_metrics)
 print(rag_results)
+print("--- %s seconds ---" % (time.time() - start_time))
