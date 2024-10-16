@@ -51,12 +51,27 @@ async def generate_all(prompts, limit=100):
     tasks = [sem_generate(prompt) for prompt in prompts]
     return await asyncio.gather(*tasks)
 
-# set-up the evaluator
+# Set up the evaluator
 evaluator = RAGChecker(
     custom_llm_api_func=my_llm_api_func
 )
 
-# evaluate results with selected metrics or certain groups, e.g., retriever_metrics, generator_metrics, all_metrics
+# Perform the evaluation
 evaluator.evaluate(rag_results, all_metrics)
+
+# After evaluation, stop and close the event loop
+def stop_event_loop(loop):
+    loop.call_soon_threadsafe(loop.stop)
+
+# Stop the loop
+stop_event_loop(loop)
+
+# Wait for the thread to finish
+t.join()
+
+# Close the loop
+loop.close()
+
+# Output the results and elapsed time
 print(rag_results)
 print("--- %s seconds ---" % (time.time() - start_time))
