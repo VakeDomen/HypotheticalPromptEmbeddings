@@ -5,6 +5,7 @@ from ollama import AsyncClient
 import time
 
 start_time = time.time()
+client = AsyncClient(host="prog3.student.famnit.upr.si:6666")
 
 with open("data_to_bm.json") as fp:
     rag_results = RAGResults.from_json(fp.read())
@@ -29,7 +30,8 @@ async def generate(prompt):
     """
     Generate a response for a single prompt.
     """
-    client = AsyncClient()
+    
+    # client = AsyncClient()
     resp =  await client.generate(model='mistral-nemo', prompt=prompt)
     return resp["response"]
 
