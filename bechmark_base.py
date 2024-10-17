@@ -7,6 +7,7 @@ from threading import Thread
 
 start_time = time.time()
 client = AsyncClient(host="prog3.student.famnit.upr.si:6666")
+# client = AsyncClient()
 
 with open("data_to_bm.json") as fp:
     rag_results = RAGResults.from_json(fp.read())
