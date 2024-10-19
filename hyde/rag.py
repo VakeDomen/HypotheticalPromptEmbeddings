@@ -3,19 +3,16 @@ import faiss
 import numpy as np
 from langchain_ollama.llms import OllamaLLM
 from langchain_ollama import OllamaEmbeddings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 print("Loading chunked data...")
 with open('../data/chunked_data.json', 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
-
-chunked_data = chunked_data[:10]
-
 print("Loading models...")
-embedding_model = OllamaEmbeddings(base_url="prog3.student.famnit.upr.si:6666", model='bge-m3')
-llm = OllamaLLM(base_url="prog3.student.famnit.upr.si:6666", model='mistral-nemo')
-
+embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model='bge-m3')
+llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
 
 print("Preparing for indexing...")
 texts = []
@@ -31,20 +28,32 @@ for doc_id, item in tqdm(enumerate(chunked_data), total=len(chunked_data)):
         })
 
 print("Embedding chunks...")
-embeddings = embedding_model.embed_documents(texts)
+
+def embed_text(i, text):
+    embedding = embedding_model.embed_documents([text])
+    return i, embedding[0]  # Since embed_documents returns a list
+
+embeddings = [None] * len(texts)  # Pre-allocate a list for embeddings
+
+with ThreadPoolExecutor(max_workers=5) as executor:
+    futures = {executor.submit(embed_text, i, text): i for i, text in enumerate(texts)}
+    
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        i, embedding = future.result()
+        embeddings[i] = embedding
+
 embeddings = np.array(embeddings).astype('float32')
+
 
 print("Creating index...")
 dimension = embeddings.shape[1]
 index = faiss.IndexFlatL2(dimension)
 index.add(embeddings)
 
-
 def generate_hypothetical_answer(question):
     prompt = f"Question: {question}\nAnswer:"
     hypothetical_answer = llm.invoke(prompt)
     return hypothetical_answer
-
 
 def retrieve_documents(question, top_k=5):
     hypo_answer = generate_hypothetical_answer(question)
@@ -55,29 +64,21 @@ def retrieve_documents(question, top_k=5):
     retrieved_metadata = [metadata[i] for i in I[0]]
     return retrieved_docs, retrieved_metadata
 
-
 def generate_final_answer(question, context):
     context_text = "\n".join(context)
     prompt = f"Answer the following question using the provided context.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     final_answer = llm.invoke(prompt)
     return final_answer
 
-results = []
-
-print("Answering questions using HyDE RAG...")
-for query_id, item in tqdm(enumerate(chunked_data), total=len(chunked_data)):
+def process_question(query_id, item):
     question = item['Q']
     gt_answer = item['A']
     if not question or not gt_answer:
-        continue  # Skip if question or answer is missing
+        return None
 
-    # Retrieve documents using HyDE
     retrieved_docs, retrieved_metadata = retrieve_documents(question)
-
-    # Generate final answer
     response = generate_final_answer(question, retrieved_docs)
 
-    # Prepare retrieved context with doc_ids
     retrieved_context = []
     for md, doc in zip(retrieved_metadata, retrieved_docs):
         retrieved_context.append({
@@ -85,16 +86,40 @@ for query_id, item in tqdm(enumerate(chunked_data), total=len(chunked_data)):
             'text': doc
         })
 
-    # Append to results
-    results.append({
+    result = {
         'query_id': f"{query_id:03d}",
         'query': question,
         'gt_answer': gt_answer,
         'response': response.strip(),
         'retrieved_context': retrieved_context
-    })
+    }
+    return result
 
-# Save results to JSON
+results = []
+
+print("Answering questions using HyDE RAG with multithreading...")
+
+max_workers = 30  
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    future_to_query_id = {
+        executor.submit(process_question, query_id, item): query_id
+        for query_id, item in enumerate(chunked_data)
+    }
+
+    for future in tqdm(as_completed(future_to_query_id), total=len(future_to_query_id)):
+        try:
+            result = future.result()
+            if result:
+                results.append(result)
+        except Exception as e:
+            query_id = future_to_query_id[future]
+            print(f"An error occurred while processing query_id {query_id}: {e}")
+
+
+print("Saving results...")
 output_data = {'results': results}
 with open('rag_results.json', 'w', encoding='utf-8') as f:
     json.dump(output_data, f, ensure_ascii=False, indent=4)
+
+
+print("Done!")
