@@ -7,7 +7,7 @@ from threading import Thread
 import sys
 
 start_time = time.time()
-client = AsyncClient(host="prog3.student.famnit.upr.si:6666")
+client = AsyncClient(host="hivecore.famnit.upr.si:6666")
 # client = AsyncClient()
 
 data = "data_to_bm.json"

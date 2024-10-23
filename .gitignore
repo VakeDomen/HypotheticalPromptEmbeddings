@@ -167,4 +167,5 @@ data/chunked_data.json
 data/test_bm.json
 hyde/rag_results.json
 hype/rag_results.json
+hype/chunks_with_questions.json
 base/rag_results.json
