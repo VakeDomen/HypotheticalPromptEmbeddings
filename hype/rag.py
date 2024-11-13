@@ -1,17 +1,21 @@
 import json
-import faiss
-import numpy as np
+import sys
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_ollama.llms import OllamaLLM
 from langchain_ollama import OllamaEmbeddings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-import re
+import numpy as np
+import faiss
 
 print("Loading chunked data...")
-with open('../data/chunked_data.json', 'r', encoding='utf-8') as f:
+data = '../data/chunked_data.json'
+if len(sys.argv) > 1:
+    data = sys.argv[1]
+with open(data, 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
-#chunked_data = chunked_data[:10]
+# chunked_data = chunked_data[:10]
 
 print("Loading models...")
 embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model='bge-m3')
@@ -19,21 +23,19 @@ llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
 
 print("Generating diverse questions for each chunk...")
 
-
-texts = []
-metadata = []
-questions_for_embedding = []
-chunks_questions = [] 
-
 def generate_questions(chunk):
-    prompt = f"Analyze the input text and generate essential questions that, when answered, capture the main points and core meaning of the text. The questions should be exhaustive and understandable without context. When possible named entities should be referenced by their full name. Only answer with questions where each question should be wirtten in it's own line(separated by newline) with no prefix. Here is the text: \n\n{chunk}\n\nQuestions:"
+    prompt = (
+        "Analyze the input text and generate essential questions that, when answered, capture the main points and core meaning of the text. "
+        "The questions should be exhaustive and understandable without context. When possible, named entities should be referenced by their full name. "
+        "Only answer with questions where each question should be written in its own line (separated by newline) with no prefix. "
+        f"Here is the text: \n\n{chunk}\n\nQuestions:"
+    )
     questions = llm.invoke(prompt)
-    #return [q.strip('- ').strip() for q in questions.strip().split('\n') if q.strip()]
-    list_pattern = re.compile(r"^\s*[\-\*\•]|\s*\d+\.\s*|\s*[a-zA-Z]\)\s*|\s*\(\d+\)\s*|\s*\([a-zA-Z]\)\s*|\s*\([ivxlcdm]+\)\s*", re.IGNORECASE)
-    
-    # Split the response into individual questions and remove list markers using regex
+    list_pattern = re.compile(
+        r"^\s*[\-\*\•]|\s*\d+\.\s*|\s*[a-zA-Z]\)\s*|\s*\(\d+\)\s*|\s*\([a-zA-Z]\)\s*|\s*\([ivxlcdm]+\)\s*",
+        re.IGNORECASE
+    )
     return [re.sub(list_pattern, '', q).strip() for q in questions.strip().split('\n') if q.strip()]
-
 
 def process_chunk(args):
     doc_id, item, chunk_id, chunk = args
@@ -45,49 +47,81 @@ def process_chunk(args):
             'chunk_text': chunk,
             'generated_questions': questions
         }
-        chunks_questions.append(chunk_info)
+        chunk_data = {
+            'chunk_info': chunk_info,
+            'texts': [],
+            'metadata': [],
+            'questions_for_embedding': []
+        }
 
         for index, question in enumerate(questions):
-            questions_for_embedding.append(question)
-            texts.append(chunk)
-            metadata.append({
+            chunk_data['texts'].append(chunk)  # Or use 'question' if you intend to embed questions
+            chunk_data['metadata'].append({
                 'doc_id': f"x{doc_id}_c{chunk_id}_q{str(index)}",
                 'chunk_id': chunk_id,
                 'Q': item['Q'],
                 'A': item['A']
             })
+            chunk_data['questions_for_embedding'].append(question)
+        
+        return chunk_data
     except Exception as e:
         print(f"An error occurred while processing chunk {doc_id}-{chunk_id}: {e}")
+        return None
 
-# Prepare arguments for concurrent processing
-chunk_args = []
-for doc_id, item in enumerate(chunked_data):
-    for chunk_id, chunk in enumerate(item['chunks']):
-        chunk_args.append((doc_id, item, chunk_id, chunk))
+# Prepare arguments for parallel processing
+args_list = [
+    (doc_id, item, chunk_id, chunk)
+    for doc_id, item in enumerate(chunked_data)
+    for chunk_id, chunk in enumerate(item['chunks'])
+]
 
-# Process all chunks concurrently
-with ThreadPoolExecutor(max_workers=30) as executor:
-    list(tqdm(executor.map(process_chunk, chunk_args), total=len(chunk_args)))
+# Initialize lists to collect results
+texts = []
+metadata = []
+questions_for_embedding = []
+chunks_questions = []
+
+print("Processing chunks in parallel...")
+with ThreadPoolExecutor() as executor:
+    futures = [executor.submit(process_chunk, args) for args in args_list]
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        result = future.result()
+        if result:
+            chunks_questions.append(result['chunk_info'])
+            texts.extend(result['texts'])
+            metadata.extend(result['metadata'])
+            questions_for_embedding.extend(result['questions_for_embedding'])
 
 print("Saving chunks and generated questions to 'chunks_with_questions.json'...")
 with open('chunks_with_questions.json', 'w', encoding='utf-8') as f:
     json.dump(chunks_questions, f, ensure_ascii=False, indent=4)
 
-print("Embedding generated questions...")
+print("Embedding chunks...")  # Changed from "Embedding generated questions..."
 
-def embed_text(i, text):
-    embedding = embedding_model.embed_documents([text])
-    return i, embedding[0]  # Since embed_documents returns a list
+def embed_text_batch(batch):
+    indices, texts_batch = zip(*batch)
+    embeddings_batch = embedding_model.embed_documents(texts_batch)
+    return list(zip(indices, embeddings_batch))
 
-embeddings = [None] * len(questions_for_embedding)  # Pre-allocate a list for embeddings
+# Set batch size
+batch_size = 5
+
+# Prepare batches for embedding chunks (texts)
+texts_batches = [
+    [(i, texts[i]) for i in range(j, min(j + batch_size, len(texts)))]
+    for j in range(0, len(texts), batch_size)
+]
+
+embeddings = [None] * len(texts)  # Pre-allocate a list for embeddings
 
 print("Embedding in parallel...")
-with ThreadPoolExecutor(max_workers=30) as executor:
-    futures = {executor.submit(embed_text, i, question): i for i, question in enumerate(questions_for_embedding)}
-
+with ThreadPoolExecutor() as executor:
+    futures = [executor.submit(embed_text_batch, batch) for batch in texts_batches]
     for future in tqdm(as_completed(futures), total=len(futures)):
-        i, embedding = future.result()
-        embeddings[i] = embedding
+        batch_results = future.result()
+        for i, embedding in batch_results:
+            embeddings[i] = embedding
 
 embeddings = np.array(embeddings).astype('float32')
 
@@ -106,7 +140,7 @@ def retrieve_documents(question, top_k=5):
 
 def generate_final_answer(question, context):
     context_text = "\n".join(context)
-    prompt = f"Answer the following question using the provided context.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
+    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer avalible'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     final_answer = llm.invoke(prompt)
     return final_answer
 
