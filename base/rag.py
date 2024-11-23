@@ -5,9 +5,13 @@ from langchain_ollama.llms import OllamaLLM
 from langchain_ollama import OllamaEmbeddings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import sys
 
 print("Loading chunked data...")
-with open('../data/chunked_data.json', 'r', encoding='utf-8') as f:
+data = '../data/chunked_data.json'
+if len(sys.argv) > 1:
+    data = sys.argv[1]
+with open(data, 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
 print("Loading models...")
@@ -15,35 +19,48 @@ embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model
 llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
 
 print("Preparing for indexing...")
-texts = []
-metadata = []
-for doc_id, item in tqdm(enumerate(chunked_data), total=len(chunked_data)):
-    for chunk_id, chunk in enumerate(item['chunks']):
-        texts.append(chunk)
-        metadata.append({
-            'doc_id': item['context_id'],
-            'chunk_id': chunk_id,
-            'Q': item['Q'],
-            'A': item['A']
-        })
+texts, metadata = zip(*[
+    (chunk, {
+        'doc_id': item['context_id'],
+        'chunk_id': chunk_id,
+        'Q': item['Q'],
+        'A': item['A']
+    })
+    for item in tqdm(chunked_data, total=len(chunked_data))
+    for chunk_id, chunk in enumerate(item['chunks'])
+])
 
-print("Embedding chunks...")
+# Convert tuples back to lists if necessary
+texts = list(texts)
+metadata = list(metadata)
 
-def embed_text(i, text):
-    embedding = embedding_model.embed_documents([text])
-    return i, embedding[0]  # Since embed_documents returns a list
+
+# Set batch size
+batch_size = 5
+
+def embed_text_batch(batch):
+    indices, texts_batch = zip(*batch)
+    embeddings_batch = embedding_model.embed_documents(texts_batch)
+    return list(zip(indices, embeddings_batch))
+
+# Create batches of indices and texts
+texts_batches = [
+    [(i, texts[i]) for i in range(j, min(j + batch_size, len(texts)))]
+    for j in range(0, len(texts), batch_size)
+]
 
 embeddings = [None] * len(texts)  # Pre-allocate a list for embeddings
 
-with ThreadPoolExecutor(max_workers=5) as executor:
-    futures = {executor.submit(embed_text, i, text): i for i, text in enumerate(texts)}
+print("Embedding chunks in batches...")
+with ThreadPoolExecutor(max_workers=50) as executor:
+    futures = {executor.submit(embed_text_batch, batch): batch for batch in texts_batches}
     
     for future in tqdm(as_completed(futures), total=len(futures)):
-        i, embedding = future.result()
-        embeddings[i] = embedding
+        batch_results = future.result()
+        for i, embedding in batch_results:
+            embeddings[i] = embedding
 
 embeddings = np.array(embeddings).astype('float32')
-
 
 print("Creating index...")
 dimension = embeddings.shape[1]

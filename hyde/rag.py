@@ -5,9 +5,13 @@ from langchain_ollama.llms import OllamaLLM
 from langchain_ollama import OllamaEmbeddings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import sys
 
 print("Loading chunked data...")
-with open('../data/chunked_data.json', 'r', encoding='utf-8') as f:
+data = '../data/chunked_data.json'
+if len(sys.argv) > 1:
+    data = sys.argv[1]
+with open(data, 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
 print("Loading models...")
@@ -15,17 +19,20 @@ embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model
 llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
 
 print("Preparing for indexing...")
-texts = []
-metadata = []
-for doc_id, item in tqdm(enumerate(chunked_data), total=len(chunked_data)):
-    for chunk_id, chunk in enumerate(item['chunks']):
-        texts.append(chunk)
-        metadata.append({
-            'doc_id': item['context_id'],
-            'chunk_id': chunk_id,
-            'Q': item['Q'],
-            'A': item['A']
-        })
+texts, metadata = zip(*[
+    (chunk, {
+        'doc_id': item['context_id'],
+        'chunk_id': chunk_id,
+        'Q': item['Q'],
+        'A': item['A']
+    })
+    for item in tqdm(chunked_data, total=len(chunked_data))
+    for chunk_id, chunk in enumerate(item['chunks'])
+])
+
+# Convert tuples back to lists if necessary
+texts = list(texts)
+metadata = list(metadata)
 
 print("Embedding chunks...")
 
@@ -51,7 +58,7 @@ index = faiss.IndexFlatL2(dimension)
 index.add(embeddings)
 
 def generate_hypothetical_answer(question):
-    prompt = f"Question: {question}\nAnswer:"
+    prompt = f"Please write a passage to answer the question.\nQuestion: {question}\nPassage:"
     hypothetical_answer = llm.invoke(prompt)
     return hypothetical_answer
 
@@ -66,7 +73,7 @@ def retrieve_documents(question, top_k=5):
 
 def generate_final_answer(question, context):
     context_text = "\n".join(context)
-    prompt = f"Answer the following question using the provided context.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
+    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer avalible'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     final_answer = llm.invoke(prompt)
     return final_answer
 
