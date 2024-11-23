@@ -34,22 +34,33 @@ texts, metadata = zip(*[
 texts = list(texts)
 metadata = list(metadata)
 
-print("Embedding chunks...")
+# Set batch size
+batch_size = 5
 
-def embed_text(i, text):
-    embedding = embedding_model.embed_documents([text])
-    return i, embedding[0]  # Since embed_documents returns a list
+def embed_text_batch(batch):
+    indices, texts_batch = zip(*batch)
+    embeddings_batch = embedding_model.embed_documents(texts_batch)
+    return list(zip(indices, embeddings_batch))
+
+# Create batches of indices and texts
+texts_batches = [
+    [(i, texts[i]) for i in range(j, min(j + batch_size, len(texts)))]
+    for j in range(0, len(texts), batch_size)
+]
 
 embeddings = [None] * len(texts)  # Pre-allocate a list for embeddings
 
-with ThreadPoolExecutor(max_workers=5) as executor:
-    futures = {executor.submit(embed_text, i, text): i for i, text in enumerate(texts)}
+print("Embedding chunks in batches...")
+with ThreadPoolExecutor(max_workers=50) as executor:
+    futures = {executor.submit(embed_text_batch, batch): batch for batch in texts_batches}
     
     for future in tqdm(as_completed(futures), total=len(futures)):
-        i, embedding = future.result()
-        embeddings[i] = embedding
+        batch_results = future.result()
+        for i, embedding in batch_results:
+            embeddings[i] = embedding
 
 embeddings = np.array(embeddings).astype('float32')
+
 
 
 print("Creating index...")

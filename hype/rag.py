@@ -15,8 +15,6 @@ if len(sys.argv) > 1:
 with open(data, 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
-# chunked_data = chunked_data[:10]
-
 print("Loading models...")
 embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model='bge-m3')
 llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
@@ -49,19 +47,23 @@ def process_chunk(args):
         }
         chunk_data = {
             'chunk_info': chunk_info,
-            'texts': [],
+            'texts': [],  # Store the chunk texts for retrieval
             'metadata': [],
-            'questions_for_embedding': []
+            'questions_for_embedding': []  # Store questions for embedding
         }
 
         for index, question in enumerate(questions):
-            chunk_data['texts'].append(chunk)  # Or use 'question' if you intend to embed questions
+            # Store the chunk text as the content to be retrieved
+            chunk_data['texts'].append(chunk)
+            # Metadata includes the chunk text and other info
             chunk_data['metadata'].append({
                 'doc_id': f"x{doc_id}_c{chunk_id}_q{str(index)}",
                 'chunk_id': chunk_id,
                 'Q': item['Q'],
-                'A': item['A']
+                'A': item['A'],
+                'chunk_text': chunk
             })
+            # Collect the generated questions for embedding
             chunk_data['questions_for_embedding'].append(question)
         
         return chunk_data
@@ -77,9 +79,9 @@ args_list = [
 ]
 
 # Initialize lists to collect results
-texts = []
+texts = []  # Chunks to retrieve
 metadata = []
-questions_for_embedding = []
+questions_to_embed = []  # Questions to embed
 chunks_questions = []
 
 print("Processing chunks in parallel...")
@@ -89,35 +91,35 @@ with ThreadPoolExecutor() as executor:
         result = future.result()
         if result:
             chunks_questions.append(result['chunk_info'])
-            texts.extend(result['texts'])
+            texts.extend(result['texts'])  # Collect chunk texts
             metadata.extend(result['metadata'])
-            questions_for_embedding.extend(result['questions_for_embedding'])
+            questions_to_embed.extend(result['questions_for_embedding'])  # Collect questions
 
 print("Saving chunks and generated questions to 'chunks_with_questions.json'...")
 with open('chunks_with_questions.json', 'w', encoding='utf-8') as f:
     json.dump(chunks_questions, f, ensure_ascii=False, indent=4)
 
-print("Embedding chunks...")  # Changed from "Embedding generated questions..."
+print("Embedding generated questions...")
 
 def embed_text_batch(batch):
-    indices, texts_batch = zip(*batch)
-    embeddings_batch = embedding_model.embed_documents(texts_batch)
+    indices, questions_batch = zip(*batch)
+    embeddings_batch = embedding_model.embed_documents(questions_batch)
     return list(zip(indices, embeddings_batch))
 
 # Set batch size
 batch_size = 5
 
-# Prepare batches for embedding chunks (texts)
-texts_batches = [
-    [(i, texts[i]) for i in range(j, min(j + batch_size, len(texts)))]
-    for j in range(0, len(texts), batch_size)
+# Prepare batches for embedding generated questions
+embedding_batches = [
+    [(i, questions_to_embed[i]) for i in range(j, min(j + batch_size, len(questions_to_embed)))]
+    for j in range(0, len(questions_to_embed), batch_size)
 ]
 
-embeddings = [None] * len(texts)  # Pre-allocate a list for embeddings
+embeddings = [None] * len(questions_to_embed)  # Pre-allocate a list for embeddings
 
 print("Embedding in parallel...")
 with ThreadPoolExecutor() as executor:
-    futures = [executor.submit(embed_text_batch, batch) for batch in texts_batches]
+    futures = [executor.submit(embed_text_batch, batch) for batch in embedding_batches]
     for future in tqdm(as_completed(futures), total=len(futures)):
         batch_results = future.result()
         for i, embedding in batch_results:
@@ -134,16 +136,22 @@ def retrieve_documents(question, top_k=5):
     question_embedding = embedding_model.embed_documents([question])
     question_embedding = np.array(question_embedding).astype('float32')
     D, I = index.search(question_embedding, top_k)
-    retrieved_docs = [texts[i] for i in I[0]]  # Retrieve the original chunk
     retrieved_metadata = [metadata[i] for i in I[0]]
+    # Retrieve the chunk texts from metadata
+    retrieved_docs = [md['chunk_text'] for md in retrieved_metadata]
     return retrieved_docs, retrieved_metadata
 
 def generate_final_answer(question, context):
     context_text = "\n".join(context)
-    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer avalible'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
+    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer available'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     final_answer = llm.invoke(prompt)
     return final_answer
 
+results = []
+
+print("Answering questions using Base RAG with multithreading...")
+
+max_workers = 30  # Adjust based on your system capabilities
 def process_question(query_id, item):
     question = item['Q']
     gt_answer = item['A']
@@ -169,11 +177,6 @@ def process_question(query_id, item):
     }
     return result
 
-results = []
-
-print("Answering questions using Base RAG with multithreading...")
-
-max_workers = 30  # Adjust based on your system capabilities
 with ThreadPoolExecutor(max_workers=max_workers) as executor:
     future_to_query_id = {
         executor.submit(process_question, query_id, item): query_id
