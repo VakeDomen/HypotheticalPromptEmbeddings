@@ -3,6 +3,7 @@ import sys
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
+import time
 from langchain_ollama.llms import OllamaLLM
 
 print("Loading chunked data...")
@@ -22,7 +23,7 @@ def generate_questions(chunk):
         "Only answer with questions where each question should be written in its own line (separated by newline) with no prefix. "
         f"Here is the text: \n\n{chunk}\n\nQuestions:"
     )
-    max_retries = 5
+    max_retries = 10
     final_questions = []
 
     for attempt in range(max_retries):
@@ -38,10 +39,11 @@ def generate_questions(chunk):
                 return final_questions
 
         except Exception as e:
-            print(f"An error occurred while invoking LLM: {e}. Retrying ({attempt + 1}/{max_retries})...")
+            if attempt + 1 == max_retries:
+                print(f"An error occurred while invoking LLM: {e}. Retrying ({attempt + 1}/{max_retries})...")
             if attempt == max_retries - 1:
                 return []
-
+            time.sleep(5)
     return []
 
     
@@ -74,7 +76,7 @@ chunks_questions = []
 print("Generating questions in parallel...")
 
 try:
-    with ThreadPoolExecutor(max_workers=100) as executor:
+    with ThreadPoolExecutor(max_workers=150) as executor:
         futures = [executor.submit(process_chunk, args) for args in args_list]
         for future in tqdm(as_completed(futures), total=len(futures)):
             result = future.result(timeout=300)  # Timeout after 5 minutes

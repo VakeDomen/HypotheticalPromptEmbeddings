@@ -10,7 +10,8 @@ from langchain_ollama import OllamaEmbeddings
 from qdrant_client import QdrantClient
 
 # Collections mapping
-COLLECTION_PREFIX="rag_10k_"
+MAX_RETRIES = 10
+COLLECTION_PREFIX="ragbench_"
 collections = {
     "base_cosine": f"{COLLECTION_PREFIX}chunks_cosine",
     "base_euclidean": f"{COLLECTION_PREFIX}chunks_euclidean",
@@ -36,16 +37,16 @@ print("Connecting to Qdrant...")
 client = QdrantClient(host="localhost", port=6333)
 
 def retrieve_documents(question, collection_name, top_k=5, deduplicate=False):
-    max_retries = 5
+    max_retries = MAX_RETRIES
     for attempt in range(max_retries):
         try:
             question_embedding = embedding_model.embed_documents([question])[0]
             break  # Exit loop if successful
         except Exception as e:
-            print(f"An error occurred while embedding the question: {e}")
-            print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
+                print(f"An error occurred while embedding the question: {e}")
+                print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
                 print(f"Failed to embed the question after {max_retries} attempts.")
                 return [], []
 
@@ -59,10 +60,10 @@ def retrieve_documents(question, collection_name, top_k=5, deduplicate=False):
             )
             break  
         except Exception as e:
-            print(f"An error occurred during Qdrant search: {e}")
-            print(f"Retrying search ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
+                print(f"An error occurred during Qdrant search: {e}")
+                print(f"Retrying search ({attempt + 1}/{max_retries})...")
                 print(f"Failed to search Qdrant after {max_retries} attempts.")
                 return [], []
     
@@ -87,19 +88,20 @@ def retrieve_documents(question, collection_name, top_k=5, deduplicate=False):
     return retrieved_docs[:top_k], retrieved_metadata[:top_k]
 
 def generate_final_answer(question, context):
-    max_retries = 5
+    max_retries = MAX_RETRIES
     context_text = "\n".join(context)
-    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer available'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
+    prompt = f"Answer the following question using the provided context. \n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     for attempt in range(max_retries):
         try:
             final_answer = llm.invoke(prompt)
             break  # Exit loop if successful
         except Exception as e:
             # print(prompt)
-            print(f"An error occurred while invoking the LLM: {e}")
-            print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")
+            
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
+                print(f"An error occurred while invoking the LLM: {e}")
+                print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")  
                 print(f"Failed to invoke LLM after {max_retries} attempts.")
                 return "No answer available"
     else:
@@ -154,7 +156,7 @@ results_hype_euclidean = []
 results_hype_cosine_dedup = []
 results_hype_euclidean_dedup = []
 
-print("Answering questions using normal retrieval with multithreading...")
+print("Answering questions...")
 
 max_workers = 100  # Adjust based on your system capabilities
 with ThreadPoolExecutor(max_workers=max_workers) as executor:

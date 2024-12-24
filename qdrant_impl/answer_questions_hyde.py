@@ -10,7 +10,7 @@ from langchain_ollama import OllamaEmbeddings
 from qdrant_client import QdrantClient
 
 # Collections mapping for chunks (same as base retrieval)
-COLLECTION_PREFIX="rag_10k_"
+COLLECTION_PREFIX="truthful_qa_"
 collections = {
     'cosine': f"{COLLECTION_PREFIX}chunks_cosine",
     'euclidean': f"{COLLECTION_PREFIX}chunks_euclidean",
@@ -32,17 +32,18 @@ print("Connecting to Qdrant...")
 client = QdrantClient(host="localhost", port=6333)
 
 def generate_hypothetical_answer(question):
-    max_retries = 5
+    max_retries = 10
     prompt = f"Please write a passage to answer the question.\nQuestion: {question}\nPassage:"
     for attempt in range(max_retries):
         try:
             hypothetical_answer = llm.invoke(prompt)
             break  # Exit loop if successful
         except Exception as e:
-            print(f"An error occurred while generating hypothetical answer: {e}")
-            print(f"Retrying hypothetical answer generation ({attempt + 1}/{max_retries})...")
+            
             time.sleep(1)  # Optional delay
             if attempt == max_retries - 1:
+                print(f"An error occurred while generating hypothetical answer: {e}")
+                print(f"Retrying hypothetical answer generation ({attempt + 1}/{max_retries})...")
                 print(f"Failed to generate hypothetical answer after {max_retries} attempts.")
                 return None
     else:
@@ -77,18 +78,19 @@ def retrieve_documents(hypothetical_answer_embedding, collection_name, top_k=5):
     return retrieved_docs, retrieved_metadata
 
 def generate_final_answer(question, context):
-    max_retries = 5
+    max_retries = 10
     context_text = "\n".join(context)
-    prompt = f"Answer the following question using the provided context. If no answer can be found in the context, answer 'No answer available'.\n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
+    prompt = f"Answer the following question using the provided context. \n\nContext:\n{context_text}\n\nQuestion:\n{question}\n\nAnswer:"
     for attempt in range(max_retries):
         try:
             final_answer = llm.invoke(prompt)
             break  # Exit loop if successful
         except Exception as e:
-            print(f"An error occurred while invoking the LLM: {e}")
-            print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")
+            
             time.sleep(1)  # Optional delay
             if attempt == max_retries - 1:
+                print(f"An error occurred while invoking the LLM: {e}")
+                print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")
                 print(f"Failed to invoke LLM after {max_retries} attempts.")
                 return "No answer available"
     else:
@@ -117,10 +119,10 @@ def process_question(query_id, item):
             hypothetical_embedding = embedding_model.embed_documents([hypothetical_answer])[0]
             break  # Exit loop if successful
         except Exception as e:
-            print(f"An error occurred while embedding the hypothetical answer: {e}")
-            print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional delay
             if attempt == max_retries - 1:
+                print(f"An error occurred while embedding the hypothetical answer: {e}")
+                print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
                 print(f"Failed to embed the hypothetical answer after {max_retries} attempts.")
                 return None
     else:
