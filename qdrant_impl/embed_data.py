@@ -23,8 +23,8 @@ client = QdrantClient(host="localhost", port=6333)
 print("Loading embedding model...")
 embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model='bge-m3')
 
-COLLECTION_PREFIX = "ragbench_"
-distance_metrics = ['cosine', 'euclidean']
+COLLECTION_PREFIX = "multihop_"
+distance_metrics = ['euclidean', "cosine"]
 distance_mapping = {
     'cosine': qdrant_models.Distance.COSINE,
     'euclidean': qdrant_models.Distance.EUCLID

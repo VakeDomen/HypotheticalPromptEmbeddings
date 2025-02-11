@@ -10,10 +10,11 @@ from langchain_ollama import OllamaEmbeddings
 from qdrant_client import QdrantClient
 
 # Collections mapping for chunks (same as base retrieval)
-COLLECTION_PREFIX="truthful_qa_"
+COLLECTION_PREFIX="ragbench_"
+K=10
 collections = {
     'cosine': f"{COLLECTION_PREFIX}chunks_cosine",
-    'euclidean': f"{COLLECTION_PREFIX}chunks_euclidean",
+    #'euclidean': f"{COLLECTION_PREFIX}chunks_euclidean",
 }
 
 print("Loading chunked data to retrieve Q and A for answering...")
@@ -39,7 +40,6 @@ def generate_hypothetical_answer(question):
             hypothetical_answer = llm.invoke(prompt)
             break  # Exit loop if successful
         except Exception as e:
-            
             time.sleep(1)  # Optional delay
             if attempt == max_retries - 1:
                 print(f"An error occurred while generating hypothetical answer: {e}")
@@ -50,7 +50,7 @@ def generate_hypothetical_answer(question):
         return None
     return hypothetical_answer.strip()
 
-def retrieve_documents(hypothetical_answer_embedding, collection_name, top_k=5):
+def retrieve_documents(hypothetical_answer_embedding, collection_name, top_k=K):
     max_retries = 5
     for attempt in range(max_retries):
         try:
@@ -62,10 +62,10 @@ def retrieve_documents(hypothetical_answer_embedding, collection_name, top_k=5):
             )
             break  # Exit loop if successful
         except Exception as e:
-            print(f"An error occurred during Qdrant search: {e}")
-            print(f"Retrying search ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional delay
             if attempt == max_retries - 1:
+                print(f"An error occurred during Qdrant search: {e}")
+                print(f"Retrying search ({attempt + 1}/{max_retries})...")
                 print(f"Failed to search Qdrant after {max_retries} attempts.")
                 return [], []
 
@@ -181,13 +181,13 @@ with ThreadPoolExecutor(max_workers=max_workers) as executor:
             print(f"An error occurred while processing query_id {query_id}: {e}")
 
 print("Saving results...")
-
-output_data_hyde_cosine = {'results': results_hyde_cosine}
-with open('rag_results_hyde_cosine.json', 'w', encoding='utf-8') as f:
-    json.dump(output_data_hyde_cosine, f, ensure_ascii=False, indent=4)
-
-output_data_hyde_euclidean = {'results': results_hyde_euclidean}
-with open('rag_results_hyde_euclidean.json', 'w', encoding='utf-8') as f:
-    json.dump(output_data_hyde_euclidean, f, ensure_ascii=False, indent=4)
+if 'cosine' in results_per_collection:
+    output_data_hyde_cosine = {'results': results_hyde_cosine}
+    with open('rag_results_hyde_cosine.json', 'w', encoding='utf-8') as f:
+        json.dump(output_data_hyde_cosine, f, ensure_ascii=False, indent=4)
+if 'euclidean' in results_per_collection:
+    output_data_hyde_euclidean = {'results': results_hyde_euclidean}
+    with open('rag_results_hyde_euclidean.json', 'w', encoding='utf-8') as f:
+        json.dump(output_data_hyde_euclidean, f, ensure_ascii=False, indent=4)
 
 print("Done!")

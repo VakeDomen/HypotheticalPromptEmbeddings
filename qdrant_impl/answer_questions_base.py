@@ -11,14 +11,15 @@ from qdrant_client import QdrantClient
 
 # Collections mapping
 MAX_RETRIES = 10
-COLLECTION_PREFIX="ragbench_"
+K=1
+COLLECTION_PREFIX="multihop_"
 collections = {
-    "base_cosine": f"{COLLECTION_PREFIX}chunks_cosine",
-    "base_euclidean": f"{COLLECTION_PREFIX}chunks_euclidean",
+    #"base_cosine": f"{COLLECTION_PREFIX}chunks_cosine",
+    #"base_euclidean": f"{COLLECTION_PREFIX}chunks_euclidean",
     "hype_cosine": f"{COLLECTION_PREFIX}questions_cosine",
-    "hype_euclidean": f"{COLLECTION_PREFIX}questions_euclidean",
-    "hype_cosine_dedup": f"{COLLECTION_PREFIX}questions_cosine",
-    "hype_euclidean_dedup": f"{COLLECTION_PREFIX}questions_euclidean"
+    #"hype_euclidean": f"{COLLECTION_PREFIX}questions_euclidean",
+    # "hype_cosine_dedup": f"{COLLECTION_PREFIX}questions_cosine",
+    # "hype_euclidean_dedup": f"{COLLECTION_PREFIX}questions_euclidean"
 }
 
 print("Loading chunked data to retrieve Q and A for answering...")
@@ -36,17 +37,17 @@ llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model="mistral-nemo")
 print("Connecting to Qdrant...")
 client = QdrantClient(host="localhost", port=6333)
 
-def retrieve_documents(question, collection_name, top_k=5, deduplicate=False):
+def retrieve_documents(question, collection_name, top_k=K, deduplicate=False):
     max_retries = MAX_RETRIES
     for attempt in range(max_retries):
         try:
             question_embedding = embedding_model.embed_documents([question])[0]
             break  # Exit loop if successful
         except Exception as e:
+            print(f"An error occurred while embedding the question: {e}")
+            print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
-                print(f"An error occurred while embedding the question: {e}")
-                print(f"Retrying embedding ({attempt + 1}/{max_retries})...")
                 print(f"Failed to embed the question after {max_retries} attempts.")
                 return [], []
 
@@ -60,10 +61,10 @@ def retrieve_documents(question, collection_name, top_k=5, deduplicate=False):
             )
             break  
         except Exception as e:
+            print(f"An error occurred during Qdrant search: {e}")
+            print(f"Retrying search ({attempt + 1}/{max_retries})...")
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
-                print(f"An error occurred during Qdrant search: {e}")
-                print(f"Retrying search ({attempt + 1}/{max_retries})...")
                 print(f"Failed to search Qdrant after {max_retries} attempts.")
                 return [], []
     
@@ -97,11 +98,11 @@ def generate_final_answer(question, context):
             break  # Exit loop if successful
         except Exception as e:
             # print(prompt)
-            
+            print(f"An error occurred while invoking the LLM: {e}")
+            print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")  
+                
             time.sleep(1)  # Optional: add delay between retries
             if attempt == max_retries - 1:
-                print(f"An error occurred while invoking the LLM: {e}")
-                print(f"Retrying LLM invocation ({attempt + 1}/{max_retries})...")  
                 print(f"Failed to invoke LLM after {max_retries} attempts.")
                 return "No answer available"
     else:
@@ -195,29 +196,34 @@ with ThreadPoolExecutor(max_workers=max_workers) as executor:
 
 print("Saving results...")
 # Save base results
-output_data_base_cosine = {"results": results_base_cosine}
-with open("rag_results_base_cosine.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_base_cosine, f, ensure_ascii=False, indent=4)
+if "base_cosine" in results_per_collection:
+    output_data_base_cosine = {"results": results_base_cosine}
+    with open("rag_results_base_cosine.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_base_cosine, f, ensure_ascii=False, indent=4)
 
-output_data_base_euclidean = {"results": results_base_euclidean}
-with open("rag_results_base_euclidean.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_base_euclidean, f, ensure_ascii=False, indent=4)
+if "base_euclidean" in results_per_collection:
+    output_data_base_euclidean = {"results": results_base_euclidean}
+    with open("rag_results_base_euclidean.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_base_euclidean, f, ensure_ascii=False, indent=4)
 
-# Save HyPE results with duplicates
-output_data_hype_cosine = {"results": results_hype_cosine}
-with open("rag_results_hype_cosine.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_hype_cosine, f, ensure_ascii=False, indent=4)
+if "hype_cosine" in results_per_collection:
+    output_data_hype_cosine = {"results": results_hype_cosine}
+    with open("rag_results_hype_cosine.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_hype_cosine, f, ensure_ascii=False, indent=4)
 
-output_data_hype_euclidean = {"results": results_hype_euclidean}
-with open("rag_results_hype_euclidean.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_hype_euclidean, f, ensure_ascii=False, indent=4)
+if "hype_euclidean" in results_per_collection:
+    output_data_hype_euclidean = {"results": results_hype_euclidean}
+    with open("rag_results_hype_euclidean.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_hype_euclidean, f, ensure_ascii=False, indent=4)
 
-output_data_hype_cosine_dedup = {"results": results_hype_cosine_dedup}
-with open("rag_results_hype_cosine_dedup.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_hype_cosine_dedup, f, ensure_ascii=False, indent=4)
-
-output_data_hype_euclidean_dedup = {"results": results_hype_euclidean_dedup}
-with open("rag_results_hype_euclidean_dedup.json", "w", encoding="utf-8") as f:
-    json.dump(output_data_hype_euclidean_dedup, f, ensure_ascii=False, indent=4)
+if "hype_cosine_dedup" in results_per_collection:
+    output_data_hype_cosine_dedup = {"results": results_hype_cosine_dedup}
+    with open("rag_results_hype_cosine_dedup.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_hype_cosine_dedup, f, ensure_ascii=False, indent=4)
+        
+if "hype_euclidean_dedup" in results_per_collection:
+    output_data_hype_euclidean_dedup = {"results": results_hype_euclidean_dedup}
+    with open("rag_results_hype_euclidean_dedup.json", "w", encoding="utf-8") as f:
+        json.dump(output_data_hype_euclidean_dedup, f, ensure_ascii=False, indent=4)
 
 print("All results saved with and without deduplication.")
