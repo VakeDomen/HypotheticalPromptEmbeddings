@@ -26,8 +26,8 @@ with open(data, 'r', encoding='utf-8') as f:
 
 
 print("Loading models...")
-embedding_model = OllamaEmbeddings(base_url="hivecore.famnit.upr.si:6666", model='bge-m3')
-llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
+embedding_model = OllamaEmbeddings(model='bge-m3')
+llm = OllamaLLM(model='mistral-nemo')
 
 print("Connecting to Qdrant...")
 client = QdrantClient(host="localhost", port=6333)

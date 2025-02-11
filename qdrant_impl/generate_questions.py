@@ -14,7 +14,7 @@ with open(data, 'r', encoding='utf-8') as f:
     chunked_data = json.load(f)
 
 print("Loading model...")
-llm = OllamaLLM(base_url="hivecore.famnit.upr.si:6666", model='mistral-nemo')
+llm = OllamaLLM(model='mistral-nemo')
 
 def generate_questions(chunk):
     prompt = (
