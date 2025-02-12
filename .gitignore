@@ -167,3 +167,7 @@ data/*.json
 hyde/*.json
 hype/*.json
 base/*.json
+
+qdrant_storage
+results
+todo.txt
